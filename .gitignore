@@ -1,0 +1,17 @@
+# Ambiente virtual Python
+.venv/
+venv/
+env/
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+
+# Arquivos de ambiente e segredos
+.env
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Configurações locais do VS Code
+.vscode/
