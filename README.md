@@ -88,10 +88,10 @@ A janela de dados é **fixa** (de 2013-01-01 até 2026-10-01, com `end` exclusiv
 
 | | Estratégia | Benchmark | SPY |
 |---|---|---|---|
-| Sharpe (treino) | – | – | – |
-| Sharpe (teste) | – | – | – |
-| Retorno anualizado (teste) | – | – | – |
-| Máx. drawdown (teste) | – | – | – |
+| Sharpe (treino) | 1.31 | 1.25 | 0.83 |
+| Sharpe (teste) | 1.23 | 1.49 | 0.62 |
+| Retorno anualizado (teste) | 34.7 % | 31.8 % | 13.1 % |
+| Máx. drawdown (teste) | -17.8 % | -15.0 % | -23.9 % |
 
 ![Crescimento acumulado](results/v1/figures/10_final.png)
 
@@ -128,4 +128,4 @@ Os testes usam preços sintéticos (não precisam de internet) e verificam, entr
 ## Uso de IA
 
 <!-- AJUSTE ao que de fato aconteceu -->
-Ferramentas de IA foram usadas como apoio (revisão, organização do código e testes). O autor revisou o código e consegue explicar e defender cada escolha metodológica.
+Ferramentas de IA foram usadas como apoio (revisão, organização do código e testes). Entretanto, mesmo com a precisão da IA, todos os resultados foram revisados manualmente.
