@@ -1,8 +1,8 @@
 import pandas as pd
 import yfinance as yf
 
-def dowload_prices(tickers, start, end):
-    raw = yf.dowload(tickers, start = start, end = end, auto_adjust=True, progress=False)
+def download_prices(tickers, start, end):
+    raw = yf.download(tickers, start = start, end = end, auto_adjust=True, progress=False)
     return raw["Close"].sort_index().dropna()
 
 def validate_prices(prices, tickers, end_date):
