@@ -8,8 +8,12 @@ Regras (todas decididas no fechamento do mês t e aplicadas ao mês t+1):
    pelo ranking de momentum entre as restantes (a carteira sempre tem 2 ações).
 4. Pesos: a 2ª do ranking recebe `min_weight` e a 1ª recebe `1 - min_weight`.
    `min_weight` é escolhido entre inteiros de 20% a 50% pelo maior Sharpe no TREINO.
+
+Segunda estratégia (`run_strategy_inverse_vol`): mesma escolha das 2 ações, mas os pesos são
+inversamente proporcionais à volatilidade recente de cada uma (sem parâmetro a ajustar no treino).
 """
 
+import numpy as np
 import pandas as pd
 
 from . import config
@@ -69,6 +73,9 @@ def rank_pairs(momentum, trend_ok):
     return ranked_pairs
 
 
+INVERSE_VOL_LABEL = "Estrategia vol. inversa"
+
+
 def top_weight(min_weight):
     """Peso da maior posição (complemento)."""
     return round(1 - min_weight, 2)
@@ -125,17 +132,23 @@ def search_weight(
     return best, table
 
 
-def run_strategy(prices, rf_monthly, train_end, grid=None, lookback=None, window=None):
-    """Pipeline completo: preços diários -> pesos escolhidos -> retornos da estratégia.
-
-    Devolve um dicionário com os objetos intermediários, para o notebook e o script usarem.
-    """
+def _select_pairs(prices, lookback=None, window=None):
+    """Passos comuns às duas estratégias: preços/retornos mensais, sinais e as 2 ações de cada mês."""
     monthly_prices = to_monthly_prices(prices)
     monthly_returns = to_monthly_returns(monthly_prices)
 
     momentum = momentum_scores(monthly_prices, lookback=lookback)
     trend_ok = trend_filter(prices, monthly_prices, window=window)
     pairs = rank_pairs(momentum, trend_ok)
+    return monthly_prices, monthly_returns, momentum, trend_ok, pairs
+
+
+def run_strategy(prices, rf_monthly, train_end, grid=None, lookback=None, window=None):
+    """Pipeline completo: preços diários -> pesos escolhidos -> retornos da estratégia.
+
+    Devolve um dicionário com os objetos intermediários, para o notebook e o script usarem.
+    """
+    monthly_prices, monthly_returns, momentum, trend_ok, pairs = _select_pairs(prices, lookback, window)
 
     min_weight, weight_table = search_weight(
         pairs, monthly_prices, monthly_returns, rf_monthly, train_end, grid
@@ -152,6 +165,57 @@ def run_strategy(prices, rf_monthly, train_end, grid=None, lookback=None, window
         "min_weight": min_weight,
         "top_weight": top_weight(min_weight),
         "weight_table": weight_table,
+        "weights": weights,
+        "strategy_returns": strategy_returns(weights, monthly_returns),
+    }
+
+
+# ---------------------------------------------------------------------------------------
+# Segunda estratégia: pesos por volatilidade inversa
+# ---------------------------------------------------------------------------------------
+
+def trailing_volatility(prices, window=None):
+    """Desvio padrão dos retornos diários nos últimos `window` pregões, lido no último pregão de cada mês.
+
+    Se `window` for None, usa config.VOL_WINDOW (lido na hora da chamada).
+    """
+    window = config.VOL_WINDOW if window is None else window
+    vol = prices.pct_change(fill_method=None).rolling(window=window).std()
+    return vol.groupby(vol.index.to_period("M")).last()
+
+
+def build_weights_inverse_vol(ranked_pairs, index, columns, volatility):
+    """Pesos inversamente proporcionais à volatilidade: w_a = (1/σ_a) / (1/σ_a + 1/σ_b), w_b = 1 - w_a.
+
+    Se a volatilidade de alguma das duas não estiver disponível (NaN ou zero), usa 50%/50%.
+    """
+    weights = pd.DataFrame(0.0, index=index, columns=columns)
+    for date, (first, second) in ranked_pairs.items():
+        inv_first = 1 / volatility.loc[date, first] if volatility.loc[date, first] > 0 else np.nan
+        inv_second = 1 / volatility.loc[date, second] if volatility.loc[date, second] > 0 else np.nan
+        w_first = 0.5 if np.isnan(inv_first + inv_second) else inv_first / (inv_first + inv_second)
+        weights.loc[date, first] = w_first
+        weights.loc[date, second] = 1 - w_first
+    return weights
+
+
+def run_strategy_inverse_vol(prices, vol_window=None, lookback=None, window=None):
+    """Segunda estratégia: mesma seleção das 2 ações, pesos por volatilidade inversa.
+
+    Não há parâmetro escolhido no treino (a janela de volatilidade é fixada a priori no config).
+    """
+    monthly_prices, monthly_returns, momentum, trend_ok, pairs = _select_pairs(prices, lookback, window)
+    volatility = trailing_volatility(prices, vol_window)
+    weights = build_weights_inverse_vol(pairs, monthly_prices.index, monthly_prices.columns, volatility)
+
+    return {
+        "monthly_prices": monthly_prices,
+        "monthly_returns": monthly_returns,
+        "benchmark_returns": equal_weight_benchmark(monthly_returns),
+        "momentum": momentum,
+        "trend_ok": trend_ok,
+        "ranked_pairs": pairs,
+        "volatility": volatility,
         "weights": weights,
         "strategy_returns": strategy_returns(weights, monthly_returns),
     }

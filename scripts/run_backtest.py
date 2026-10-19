@@ -1,9 +1,10 @@
 """Roda o backtest completo e salva tabelas e figuras em results/<versão>/.
 
 Uso (na raiz do projeto, com o ambiente ativado):
-    python scripts/run_backtest.py                 # baixa os preços do Yahoo Finance
-    python scripts/run_backtest.py --use-cache     # lê/gera o cache em data/raw/ (não vai para o Git)
-    python scripts/run_backtest.py --version v1    # nome da pasta de resultados
+    python scripts/run_backtest.py                           # estratégia 1 (busca de pesos) -> results/v1
+    python scripts/run_backtest.py --strategy inverse_vol    # estratégia 2 (vol. inversa)   -> results/v2
+    python scripts/run_backtest.py --use-cache               # lê/gera o cache em data/raw/ (não vai para o Git)
+    python scripts/run_backtest.py --version teste           # força outro nome de pasta de resultados
 
 O notebook faz a mesma análise com texto e gráficos na tela; este script serve para
 reproduzir tudo com um comando e sem abrir o Jupyter.
@@ -18,6 +19,7 @@ matplotlib.use("Agg")  # sem janelas: as figuras só são salvas (precisa vir an
 
 import pandas as pd  # noqa: E402
 
+from long_only_v1 import config  # noqa: E402
 from long_only_v1 import costs as C  # noqa: E402
 from long_only_v1 import metrics as M  # noqa: E402
 from long_only_v1 import plots as P  # noqa: E402
@@ -54,12 +56,16 @@ def get_prices(use_cache: bool):
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Backtest long-only de 2 ações entre 5.")
-    parser.add_argument("--version", default="v1", help="nome da pasta em results/ (padrão: v1)")
+    parser.add_argument("--strategy", choices=["weight_search", "inverse_vol"], default="weight_search",
+                        help="weight_search: pesos 20%%-50%% escolhidos no treino; inverse_vol: pesos por volatilidade inversa")
+    parser.add_argument("--version", default=None,
+                        help="pasta em results/ (padrão: v1 para weight_search, v2 para inverse_vol)")
     parser.add_argument("--use-cache", action="store_true", help="usar/gerar CSVs em data/raw/")
     args = parser.parse_args(argv)
+    version = args.version or {"weight_search": "v1", "inverse_vol": "v2"}[args.strategy]
 
-    figures = ROOT / "results" / args.version / "figures"
-    tables = ROOT / "results" / args.version / "tables"
+    figures = ROOT / "results" / version / "figures"
+    tables = ROOT / "results" / version / "tables"
     tables.mkdir(parents=True, exist_ok=True)
 
     def save_table(df, name):
@@ -74,18 +80,24 @@ def main(argv=None) -> None:
     P.plot_prices(prices, **fig("01_precos.png"))
     P.plot_daily_growth(R.growth_of_one(R.daily_returns(prices)), **fig("02_crescimento_diario.png"))
 
-    # 2) Estratégia (a grade de pesos vem do config.py) --------------------------------
-    out = S.run_strategy(prices, RF_MONTHLY, TRAIN_END)
+    # 2) Estratégia (parâmetros vêm do config.py) --------------------------------------
+    if args.strategy == "weight_search":
+        out = S.run_strategy(prices, RF_MONTHLY, TRAIN_END)
+        min_weight = out["min_weight"]
+        label = S.strategy_label(min_weight)
+        print(f"Pesos escolhidos: {out['top_weight']:.0%} / {min_weight:.0%} (maior Sharpe no treino)")
+        save_table(out["weight_table"], "busca_de_pesos")
+        P.plot_weight_search(out["weight_table"], min_weight, **fig("04_busca_de_pesos.png"))
+    else:
+        out = S.run_strategy_inverse_vol(prices)
+        label = S.INVERSE_VOL_LABEL
+        print(f"Pesos por volatilidade inversa (janela de {config.VOL_WINDOW} pregões)")
+        save_table(out["volatility"], "volatilidade_mensal")
+
     weights, strategy_returns = out["weights"], out["strategy_returns"]
     benchmark_returns, monthly_returns = out["benchmark_returns"], out["monthly_returns"]
-    min_weight = out["min_weight"]
-    label = S.strategy_label(min_weight)
-    print(f"Pesos escolhidos: {out['top_weight']:.0%} / {min_weight:.0%} (maior Sharpe no treino)")
-
-    save_table(out["weight_table"], "busca_de_pesos")
     save_table(weights, "pesos_finais")
     save_table(strategy_returns.rename("retorno_estrategia"), "retornos_estrategia")
-    P.plot_weight_search(out["weight_table"], min_weight, **fig("04_busca_de_pesos.png"))
 
     stock_growth = R.growth_of_one(monthly_returns)
     benchmark_growth = R.growth_of_one(benchmark_returns)
@@ -137,7 +149,7 @@ def main(argv=None) -> None:
     print("\nSharpe (treino):\n" + metrics_train.loc["Sharpe"].round(3).to_string())
     print("\nSharpe (teste):\n" + metrics_test.loc["Sharpe"].round(3).to_string())
     print(f"\nTurnover médio mensal: {turnover.mean():.1%}")
-    print(f"Resultados salvos em: {ROOT / 'results' / args.version}")
+    print(f"Resultados salvos em: {ROOT / 'results' / version}")
 
 
 if __name__ == "__main__":
